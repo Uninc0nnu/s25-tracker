@@ -2,7 +2,7 @@ name: Check Samsung S25 Updates
 
 on:
   schedule:
-    - cron: '50 * * * *'
+    - cron: '7 * * * *'
   workflow_dispatch:
 
 jobs:
