@@ -1,6 +1,9 @@
 name: Check Samsung S25 Updates
 
+name: Check Samsung S25 Updates
+
 on:
+  push:
   schedule:
     - cron: '*/10 * * * *'
   workflow_dispatch:
