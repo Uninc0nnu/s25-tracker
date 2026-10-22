@@ -60,53 +60,79 @@ def check_updates() -> None:
     try:
         res_fra = session.get(fra_url, headers={"Referer": URL}, timeout=15)
         res_fra.raise_for_status()
+        # Correction essentielle : forcer l'encodage UTF-8 pour éviter le mojibake
+        res_fra.encoding = "utf-8"
     except requests.RequestException as err:
         print(f"Erreur {fra_url} : {err}")
         return
 
-    soup = BeautifulSoup(res_fra.text, "html.parser")
+    page_html = res_fra.text
+    soup = BeautifulSoup(page_html, "html.parser")
 
-    # 1. Extraction du build
-    build_match = re.search(r"S931B[A-Z0-9]+", res_fra.text)
+    # 1. Extraction du numéro de build le plus récent
+    build_match = re.search(r"S931B[A-Z0-9]+", page_html)
     current_build = build_match.group(0) if build_match else "Inconnue"
 
-    # 2. Extraction du patch de sécurité et de la date
+    # 2. Isoler uniquement la première mise à jour (section courante)
+    # Dans les pages doc.samsungmobile, chaque version commence par un en-tête / conteneur
+    text_full = soup.get_text("\n")
+    # On découpe le texte pour ne garder que ce qui concerne le build actuel
+    sections = re.split(r"(?:Num[eé]ro de version\s*:\s*)", text_full)
+    current_section = ""
+    for sec in sections:
+        if current_build in sec:
+            current_section = sec
+            break
+
+    # 3. Extraction du patch de sécurité et de la date
     security_patch = "Non précisé"
+    release_date = ""
+
     patch_match = re.search(
-        r"(?:Correctif de sécurité|Niveau du correctif de sécurité)\s*:\s*([^\r\n<]+)",
-        res_fra.text,
+        r"(?:Niveau du correctif de s[eé]curit[eé]|Correctif de s[eé]curit[eé])\s*:\s*([0-9]{4}-[0-9]{2}-[0-9]{2})",
+        page_html,
         re.IGNORECASE,
     )
     if patch_match:
         security_patch = patch_match.group(1).strip()
 
-    # 3. Extraction du texte de changelog
-    changelog = "Consultez le lien pour plus de détails."
+    date_match = re.search(
+        r"(?:Date de sortie)\s*:\s*([0-9]{4}-[0-9]{2}-[0-9]{2})",
+        page_html,
+        re.IGNORECASE,
+    )
+    if date_match:
+        release_date = date_match.group(1).strip()
 
-    # Cible la section descriptive ou le premier conteneur de mise à jour
-    desc_node = soup.find(class_=re.compile(r"desc|c-body|section", re.I))
-    if not desc_node:
-        containers = soup.find_all("div", class_=re.compile(r"container|item|box", re.I))
-        if containers:
-            desc_node = containers[0]
+    # 4. Nettoyage ciblé du changelog (uniquement les nouveautés de la version courante)
+    changelog_lines = []
+    if current_section:
+        raw_lines = [l.strip() for l in current_section.splitlines() if l.strip()]
+        # Supprimer les métadonnées déjà capturées
+        for line in raw_lines:
+            low = line.lower()
+            if any(
+                k in low
+                for k in [
+                    current_build.lower(),
+                    "version android",
+                    "date de sortie",
+                    "correctif de s",
+                    "ces modifications peuvent varier",
+                ]
+            ):
+                continue
+            changelog_lines.append(line)
 
-    if desc_node:
-        # Nettoyage des listes et paragraphes
-        lines = [line.strip() for line in desc_node.get_text("\n").splitlines() if line.strip()]
-        # Élimination des lignes redondantes d'en-tête (Numéro de version, date, etc.)
-        filtered_lines = [
-            l for l in lines
-            if not any(k in l.lower() for k in ["numéro de version", "correctif de sécurité", "date de publication"])
-        ]
-        if filtered_lines:
-            changelog = "\n".join(filtered_lines)
+    changelog = "\n".join(changelog_lines).strip()
+    if not changelog:
+        changelog = "Consultez le lien pour plus de détails."
 
-    # Échappement des balises HTML parasites pour Telegram
     changelog = html.escape(changelog)
     if len(changelog) > 1500:
         changelog = changelog[:1500] + "\n[...]"
 
-    # 4. Comparaison avec la dernière version mémorisée
+    # 5. Comparaison d'état
     last_build = ""
     if os.path.exists(LAST_BUILD_FILE):
         with open(LAST_BUILD_FILE, "r", encoding="utf-8") as f:
@@ -119,9 +145,10 @@ def check_updates() -> None:
         return
 
     if current_build != last_build:
+        date_str = f" ({release_date})" if release_date else ""
         message = (
             f"🚀 <b>Nouvelle mise à jour Galaxy S25 ({CSC})</b>\n\n"
-            f"📦 <b>Version :</b> <code>{current_build}</code>\n"
+            f"📦 <b>Version :</b> <code>{current_build}</code>{date_str}\n"
             f"🛡️ <b>Patch sécurité :</b> {html.escape(security_patch)}\n\n"
             f"<b>Changelog :</b>\n{changelog}\n\n"
             f"🔗 <a href='{URL}'>Voir sur doc.samsungmobile</a>"
