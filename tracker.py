@@ -1,3 +1,4 @@
+import html
 import os
 import re
 from urllib.parse import urljoin
@@ -64,28 +65,48 @@ def check_updates() -> None:
         return
 
     soup = BeautifulSoup(res_fra.text, "html.parser")
+
+    # 1. Extraction du build
     build_match = re.search(r"S931B[A-Z0-9]+", res_fra.text)
     current_build = build_match.group(0) if build_match else "Inconnue"
 
+    # 2. Extraction du patch de sécurité et de la date
     security_patch = "Non précisé"
+    patch_match = re.search(
+        r"(?:Correctif de sécurité|Niveau du correctif de sécurité)\s*:\s*([^\r\n<]+)",
+        res_fra.text,
+        re.IGNORECASE,
+    )
+    if patch_match:
+        security_patch = patch_match.group(1).strip()
+
+    # 3. Extraction du texte de changelog
     changelog = "Consultez le lien pour plus de détails."
 
-    containers = soup.find_all("div", class_="container")
-    if containers:
-        first_box = containers[0]
-        for tag in first_box.find_all(["p", "span", "li"]):
-            txt = tag.get_text(strip=True)
-            if "Correctif" in txt or "sécurité" in txt:
-                security_patch = txt
-                break
+    # Cible la section descriptive ou le premier conteneur de mise à jour
+    desc_node = soup.find(class_=re.compile(r"desc|c-body|section", re.I))
+    if not desc_node:
+        containers = soup.find_all("div", class_=re.compile(r"container|item|box", re.I))
+        if containers:
+            desc_node = containers[0]
 
-        c_body = first_box.find("div", class_="c-body")
-        if c_body:
-            changelog = c_body.get_text("\n", strip=True)
+    if desc_node:
+        # Nettoyage des listes et paragraphes
+        lines = [line.strip() for line in desc_node.get_text("\n").splitlines() if line.strip()]
+        # Élimination des lignes redondantes d'en-tête (Numéro de version, date, etc.)
+        filtered_lines = [
+            l for l in lines
+            if not any(k in l.lower() for k in ["numéro de version", "correctif de sécurité", "date de publication"])
+        ]
+        if filtered_lines:
+            changelog = "\n".join(filtered_lines)
 
-    if len(changelog) > 2000:
-        changelog = changelog[:2000] + "\n[...]"
+    # Échappement des balises HTML parasites pour Telegram
+    changelog = html.escape(changelog)
+    if len(changelog) > 1500:
+        changelog = changelog[:1500] + "\n[...]"
 
+    # 4. Comparaison avec la dernière version mémorisée
     last_build = ""
     if os.path.exists(LAST_BUILD_FILE):
         with open(LAST_BUILD_FILE, "r", encoding="utf-8") as f:
@@ -101,7 +122,7 @@ def check_updates() -> None:
         message = (
             f"🚀 <b>Nouvelle mise à jour Galaxy S25 ({CSC})</b>\n\n"
             f"📦 <b>Version :</b> <code>{current_build}</code>\n"
-            f"🛡️ <b>Détails :</b> {security_patch}\n\n"
+            f"🛡️ <b>Patch sécurité :</b> {html.escape(security_patch)}\n\n"
             f"<b>Changelog :</b>\n{changelog}\n\n"
             f"🔗 <a href='{URL}'>Voir sur doc.samsungmobile</a>"
         )
