@@ -35,4 +35,4 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add last_build.txt || true
-          git diff --quiet && git diff --staged --quiet || (git commit -m "chore: bump build version" && git push)
+          git diff --quiet && git diff --staged --quiet || (git comm
