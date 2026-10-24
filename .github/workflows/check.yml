@@ -1,8 +1,6 @@
 name: Check Samsung S25 Updates
 
 on:
-  schedule:
-    - cron: '0 8 * * *' # Sécurité de secours une fois par jour
   workflow_dispatch:
   repository_dispatch:
     types: [run-tracker]
